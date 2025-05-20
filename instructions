@@ -1,0 +1,157 @@
+
+⸻
+
+📁 GitHub Repo Structure: SOC-Automation-AWS
+
+SOC-Automation-AWS/
+│
+├── README.md                 ← Project summary, overview, and workflow diagram
+├── instructions.md           ← Full step-by-step deployment guide (detailed below)
+├── what-it-does.md           ← Technical explanation of how the full pipeline functions
+├── architecture.png          ← Diagram of the infrastructure (optional but recommended)
+├── wazuh/
+│   ├── ossec.conf            ← Sample Wazuh config with Shuffle integration
+│   └── active-response.xml   ← Example AR rule for IP blocking
+│
+├── shuffle/
+│   ├── workflow.json         ← Exported Shuffle workflow
+│   └── virus-total-fix.md    ← Instructions for patching the VT API call
+│
+├── thehive/
+│   └── hive-setup.md         ← Setup, API key generation, permissions
+│
+└── screenshots/
+    └── *.png                 ← Key screenshots of Wazuh, Shuffle, TheHive, and email alerts
+
+
+⸻
+
+📘 instructions.md – Step-by-Step Deployment
+
+1. Cloud Environment Setup (AWS)
+	•	Launch EC2 instance for Wazuh:
+	•	OS: Ubuntu 22.04 LTS
+	•	Type: t2.medium (Free tier OK if new)
+	•	Open ports:
+	•	22 (SSH)
+	•	443 (Wazuh dashboard)
+	•	1514 (TCP for agent communication)
+	•	55000 (Wazuh API)
+	•	Launch second EC2 instance for TheHive (Ubuntu) and open port 9000
+
+⸻
+
+2. Wazuh Installation
+
+curl -sO https://packages.wazuh.com/4.6/wazuh-install.sh
+sudo bash wazuh-install.sh -a --ignore-check
+
+	•	Wait ~10–15 mins for installation
+	•	Login to Wazuh dashboard at https://<EC2-IP> with provided admin password
+
+⸻
+
+3. Windows VM Setup (VirtualBox)
+	•	Download Windows 10 ISO and install in VirtualBox
+	•	Install Sysmon
+	•	Download and install Wazuh agent
+	•	Configure ossec.conf on the VM:
+
+<server>
+  <address>your-wazuh-ec2-ip</address>
+  <port>1514</port>
+  <protocol>tcp</protocol>
+</server>
+
+	•	Restart agent from services.msc
+
+⸻
+
+4. Shuffle Setup
+	•	Go to https://shuffler.io
+	•	Create a new workflow:
+	•	Trigger: Webhook
+	•	Steps:
+	•	Regex (extract hash)
+	•	VirusTotal (API key required)
+	•	TheHive (alert creation)
+	•	Email node (send alert)
+	•	(Optional) HTTP + Wazuh API for active response
+	•	Copy webhook URL from Shuffle and insert into your Wazuh ossec.conf:
+
+<integration>
+  <name>custom</name>
+  <hook_url>https://app.shuffler.io/trigger/your-webhook</hook_url>
+  <rule_id>100002</rule_id> <!-- Customize this -->
+</integration>
+
+	•	Restart Wazuh Manager
+
+⸻
+
+5. VirusTotal Integration
+	•	Sign up at https://www.virustotal.com
+	•	Get your API key and paste it into Shuffle app
+	•	Fix endpoint:
+	•	VT’s new API expects:
+
+https://www.virustotal.com/api/v3/files/{id}
+
+
+	•	Modify Shuffle’s VirusTotal app to match this if necessary
+
+⸻
+
+6. TheHive Setup
+	•	SSH into Hive EC2 and install TheHive (use thehive-project.org docs)
+	•	Default login:
+	•	admin@thehive.local / secret
+	•	Create new organization (e.g., mydfir)
+	•	Add:
+	•	Analyst user (login + password)
+	•	Service account for Shuffle (generate API key)
+
+⸻
+
+7. Connecting Shuffle to TheHive
+	•	In Shuffle:
+	•	Add TheHive app
+	•	Paste your Hive API key
+	•	Use action: create alert
+	•	Provide dynamic fields:
+	•	title, summary, description
+	•	computer, user, timestamp
+
+⸻
+
+8. Email Integration (Optional)
+	•	Use disposable emails (e.g., SquareX)
+	•	Add Email app in Shuffle
+	•	Trigger alerts to analysts with:
+	•	Hostname
+	•	SHA-256 hash
+	•	Detection summary
+
+⸻
+
+9. Active Response (Optional Linux Integration)
+	•	Add <active-response> config in Wazuh:
+
+<active-response>
+  <command>firewalldrop</command>
+  <location>local</location>
+  <level>7</level>
+  <timeout>0</timeout>
+</active-response>
+
+	•	Add Wazuh API HTTP node in Shuffle
+	•	Send commands via firewalldrop0 to dynamically block IPs using iptables
+
+⸻
+
+10. Testing It All
+	•	Trigger Mimikatz or custom detection rule on Windows VM
+	•	Wazuh → Shuffle → VirusTotal → TheHive → Email
+	•	Test “block” response → confirm IP added to iptables on Ubuntu agent
+
+⸻
